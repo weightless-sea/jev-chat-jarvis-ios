@@ -78,5 +78,67 @@ check("风险·0 分", riskLabel(for: 0), RISK_LEVELS[0])
 check("风险·四舍五入", riskLabel(for: 4.6), RISK_LEVELS[5])
 check("风险·封顶", riskLabel(for: 8.9), RISK_LEVELS[9])
 
+// MARK: 无 App Group 的配置导入（仅使用假凭据）
+
+func checkKeyboardTransfer() {
+    let localKey = "jev.keyboard.import.v1"
+    let previous = UserDefaults.standard.object(forKey: localKey)
+    defer {
+        if let previous { UserDefaults.standard.set(previous, forKey: localKey) }
+        else { UserDefaults.standard.removeObject(forKey: localKey) }
+    }
+    let appConfig = JevStore.loadConfig()
+    var cfg = JevConfig()
+    cfg.genKey = "test-placeholder-not-a-real-key"
+    cfg.genKind = .anthropic
+    cfg.genExtraJSON = "{\"temperature\":0.5}"
+    cfg.judgeKey = "test-judge-placeholder"
+    cfg.customTones = ["测试话术": "保持简短"]
+    cfg.slots = ["测试话术"]
+    let transfer = JevKeyboardTransfer(config: cfg, language: .english)
+    do {
+        let data = try transfer.encoded()
+        try JevStore.importKeyboardConfig(data)
+        check("导入·完整配置", JevStore.loadKeyboardConfig() == cfg ? "ok" : "bad", "ok")
+        check("导入·语言", JevStore.loadKeyboardLanguage().rawValue, "en")
+        check("导入·主App未改动", JevStore.loadConfig() == appConfig ? "ok" : "bad", "ok")
+        var edited = cfg
+        edited.slots = ["稳如老狗"]
+        JevStore.saveKeyboardConfig(edited)
+        check("导入·键盘话术持久化", JevStore.loadKeyboardConfig() == edited ? "ok" : "bad", "ok")
+        check("导入·话术不回写主App", JevStore.loadConfig() == appConfig ? "ok" : "bad", "ok")
+        var unsupported = transfer
+        unsupported.version = 99
+        var invalidEndpoint = transfer
+        invalidEndpoint.config.genBase = "file:///tmp/config"
+        var missingKey = transfer
+        missingKey.config.genKey = "  "
+        var invalidJSON = transfer
+        invalidJSON.config.genExtraJSON = "[]"
+        let rejected = [Data("ordinary chat text".utf8),
+                        try JSONEncoder().encode(unsupported),
+                        try JSONEncoder().encode(invalidEndpoint),
+                        try JSONEncoder().encode(missingKey),
+                        try JSONEncoder().encode(invalidJSON),
+                        Data(repeating: 32, count: 256 * 1024 + 1)]
+        for (index, payload) in rejected.enumerated() {
+            do {
+                try JevStore.importKeyboardConfig(payload)
+                check("导入·拒绝无效数据 \(index)", "accepted", "rejected")
+            } catch {
+                check("导入·拒绝无效数据 \(index)", "rejected", "rejected")
+            }
+            check("导入·失败保留原配置 \(index)", JevStore.loadKeyboardConfig() == edited ? "ok" : "bad", "ok")
+        }
+        try JevStore.importKeyboardConfig(data)
+        check("导入·再次导入替换副本", JevStore.loadKeyboardConfig() == cfg ? "ok" : "bad", "ok")
+        JevStore.clearKeyboardImport()
+        check("导入·清除恢复共享", JevStore.loadKeyboardConfig() == appConfig ? "ok" : "bad", "ok")
+    } catch {
+        check("导入·有效配置不应失败", "failed", "ok")
+    }
+}
+checkKeyboardTransfer()
+
 print("\n\(pass) passed, \(fail) failed")
 exit(fail == 0 ? 0 : 1)

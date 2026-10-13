@@ -9,6 +9,27 @@ final class AutoLaunchTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testManualKeyboardConfigExportIsAvailable() throws {
+        let app = XCUIApplication()
+        app.launch()
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 15))
+        let models = tabBar.buttons["模型"].exists ? tabBar.buttons["模型"] : tabBar.buttons["Models"]
+        models.tap()
+        let copy = app.buttons["copyKeyboardConfig"]
+        for _ in 0..<8 {
+            if copy.exists && copy.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(copy.exists && copy.isHittable)
+        copy.tap()
+        let feedback = app.staticTexts.matching(NSPredicate(
+            format: "label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@",
+            "已复制。", "复制失败：", "Copied.", "Copy failed."
+        )).firstMatch
+        XCTAssertTrue(feedback.waitForExistence(timeout: 5))
+    }
+
     // MARK: - 场景1:冷启动冒烟(审核场景)
 
     func testColdLaunchSmoke() throws {

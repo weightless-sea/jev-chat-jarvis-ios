@@ -5,13 +5,46 @@ import UIKit
 struct ProvidersView: View {
     @EnvironmentObject private var store: ConfigStore
 
+    @State private var transferStatus: String?
+
     var body: some View {
         NavigationStack {
             Form {
                 judgeSection
                 generationSection
+                keyboardTransferSection
             }
             .navigationTitle(jevLocalized(store.language, zh: "模型", en: "Models"))
+        }
+    }
+
+    private var keyboardTransferSection: some View {
+        Section {
+            Button {
+                do {
+                    try JevConfigClipboard.copy(config: store.config, language: store.language)
+                    transferStatus = jevLocalized(store.language,
+                        zh: "已复制。两分钟内切换到 Jev 键盘，点「导入配置」。",
+                        en: "Copied. Switch to Jev Keyboard and tap Import Config within two minutes.")
+                } catch {
+                    transferStatus = jevLocalized(store.language,
+                        zh: "复制失败：请检查生成层地址、Key、模型和额外 JSON，然后重试。",
+                        en: "Copy failed. Check the generation URL, key, model and extra JSON, then retry.")
+                }
+            } label: {
+                Label(jevLocalized(store.language, zh: "复制配置到键盘", en: "Copy Config to Keyboard"),
+                      systemImage: "doc.on.clipboard")
+            }
+            .accessibilityIdentifier("copyKeyboardConfig")
+            if let transferStatus {
+                Text(transferStatus).font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(jevLocalized(store.language, zh: "免费签名 / 手动同步", en: "Free signing / Manual sync"))
+        } footer: {
+            Text(jevLocalized(store.language,
+                zh: "主 App 测试成功但键盘未配置时使用。会复制包含 API Key 的配置到本机剪贴板（未加密），两分钟后过期，导入成功后清除。不要分享给别人。导入后键盘使用独立配置；以后修改模型、Key、话术或语言，需要重新复制并导入。仍须开启键盘「允许完全访问」。",
+                en: "Use if the app test succeeds but the keyboard is unconfigured. Copies configuration including API keys to the local clipboard, unencrypted, for two minutes; clears it after import. Do not share it. The keyboard uses an independent copy; repeat after changing models, keys, tones or language. Full Access is still required."))
         }
     }
 

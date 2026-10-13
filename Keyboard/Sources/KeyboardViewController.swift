@@ -11,7 +11,7 @@ import UIKit
 /// 这是 iOS 键盘扩展的唯一开关，没有别的权限可申请。
 final class KeyboardViewController: UIInputViewController {
 
-    private var language: JevLanguage { JevStore.loadLanguage() }
+    private var language: JevLanguage { JevStore.loadKeyboardLanguage() }
 
     private func L(_ zh: String, _ en: String) -> String {
         jevLocalized(language, zh: zh, en: en)
@@ -24,6 +24,7 @@ final class KeyboardViewController: UIInputViewController {
     private var lastMessage: String = ""
     private var analysis: Analysis?
     private var errorText: String = ""
+    private var importNotice: String?
     private var stageLabel = UILabel()
 
     private enum Source { case clipboard, inputField }
@@ -78,6 +79,8 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if mode == .gate && hasFullAccess { mode = .idle }
+        if !hasFullAccess { mode = .gate }
         statusLabel.text = hasFullAccess ? L("Jev · 已连接", "Jev · Connected")
             : L("Jev · 需要完全访问", "Jev · Full Access required")
         render()
@@ -95,7 +98,7 @@ final class KeyboardViewController: UIInputViewController {
     /// 结果直接丢掉（失败也无所谓，真分析时该走的路径照走）。
     private func prewarm() {
         guard hasFullAccess else { return }
-        let g = JevStore.loadConfig().generation
+        let g = JevStore.loadKeyboardConfig().generation
         guard !g.key.isEmpty, !g.base.isEmpty else { return }
         let base = g.base.hasSuffix("/") ? String(g.base.dropLast()) : g.base
         guard let url = URL(string: base + "/models") else { return }
@@ -351,7 +354,7 @@ final class KeyboardViewController: UIInputViewController {
     // MARK: 待机视图
 
     private func idleView() -> UIView {
-        let cfg = JevStore.loadConfig()
+        let cfg = JevStore.loadKeyboardConfig()
 
         let guide = KB.label(
             L("长按对方消息 → 复制，再点下面的按钮", "Long-press the message → Copy, then tap a button below"),
@@ -384,18 +387,46 @@ final class KeyboardViewController: UIInputViewController {
         // 待机页**不放**发送键：这一页还没有候选，没有可发的东西；而输入框一旦有字，
         // 宿主 App 自己的发送按钮就出来了，
         // 键盘下方再挂一个只是添乱。发送键只在结果页——点完候选、手还在面板上时用。
-        let vstack = UIStackView(arrangedSubviews: [guide, btnRow, tonesBtn])
+        let importButton = KB.button(L("导入配置", "Import Config"), icon: "square.and.arrow.down")
+        importButton.accessibilityIdentifier = "importKeyboardConfig"
+        importButton.addTarget(self, action: #selector(importConfig), for: .touchUpInside)
+        importButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        let vstack = UIStackView(arrangedSubviews: [guide, btnRow, tonesBtn, importButton])
+        if JevStore.keyboardImport != nil {
+            let local = KB.label(L("配置：键盘独立副本；主 App 修改后需重新导入", "Config: local copy; re-import after app changes"),
+                                 font: .systemFont(ofSize: 11), color: KB.secondaryText, lines: 0)
+            vstack.addArrangedSubview(local)
+            let reset = KB.button(L("清除独立配置", "Clear Local Config"), icon: "trash")
+            reset.addTarget(self, action: #selector(clearImportedConfig), for: .touchUpInside)
+            reset.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            vstack.addArrangedSubview(reset)
+        }
+        if let importNotice {
+            vstack.addArrangedSubview(KB.label(importNotice, font: .systemFont(ofSize: 12),
+                                              color: KB.secondaryText, lines: 0))
+        }
         vstack.axis = .vertical
         vstack.spacing = 8
         if JevDraft(cfg: cfg).isConfigured {
             // 配置完整时不占行
         } else {
-            let warn = KB.label(L("⚠️ 还没配置生成层：打开 Jev Jarvis App →「模型」页填 API Key", "⚠️ Generation is not configured: open Jev Jarvis → Models and add an API key"),
+            let warn = KB.label(L("⚠️ 还没配置生成层：主 App「模型」页填好后点「复制配置到键盘」，再点这里的「导入配置」", "⚠️ Set up Models in Jev Jarvis, tap Copy Config to Keyboard, then Import Config here"),
                                 font: .systemFont(ofSize: 12), color: .systemOrange, lines: 0)
             vstack.addArrangedSubview(warn)
         }
+        // 小屏/横屏达到面板高度上限后允许滚动，导入和清除按钮仍然可达。
+        let scroll = UIScrollView()
+        scroll.addSubview(vstack)
+        vstack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            vstack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            vstack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            vstack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            vstack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            vstack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
+        ])
         fitBlocks = [vstack]
-        return vstack
+        return scroll
     }
 
     // MARK: 话术选择视图（直接在键盘上配）
@@ -405,7 +436,7 @@ final class KeyboardViewController: UIInputViewController {
     /// 话术选择：内置 + 自定义全列出来，点一下选中/取消，最多 3 个槽。
     /// 每次从共享配置重新读（App 那边改过也能立刻看到），选中即落盘，下一次分析就生效。
     private func tonesView() -> UIView {
-        let cfg = JevStore.loadConfig()
+        let cfg = JevStore.loadKeyboardConfig()
         let names = orderedToneNames(custom: cfg.customTones)
         let active = cfg.activeSlots
 
@@ -456,7 +487,7 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func toneChipTapped(_ sender: UIButton) {
         guard let name = sender.accessibilityIdentifier else { return }
-        var cfg = JevStore.loadConfig()
+        var cfg = JevStore.loadKeyboardConfig()
         var slots = cfg.slots
         while slots.count < MAX_SLOTS { slots.append(NONE_LABEL) }
         if let i = slots.firstIndex(of: name) {
@@ -467,7 +498,7 @@ final class KeyboardViewController: UIInputViewController {
             slots[MAX_SLOTS - 1] = name                // 槽满了就顶掉最后一个
         }
         cfg.slots = Array(slots.prefix(MAX_SLOTS))
-        JevStore.saveConfig(cfg)                       // 立刻落盘：下一次分析就用新槽位
+        JevStore.saveKeyboardConfig(cfg)                       // 立刻落盘：下一次分析就用新槽位
         render()                                       // 重画刷新高亮
     }
 
@@ -683,9 +714,34 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: 动作
 
+    @objc private func importConfig() {
+        guard hasFullAccess else { setMode(.gate); return }
+        do {
+            try JevConfigClipboard.importIntoKeyboard()
+            importNotice = L("导入成功，配置已保存在键盘。请重新复制要分析的聊天消息。",
+                             "Imported and saved in the keyboard. Copy a chat message to analyze.")
+        } catch {
+            importNotice = L("导入失败，原配置未更改。请在主 App「模型」页重新复制配置，两分钟内重试，并允许粘贴。",
+                             "Import failed; previous config unchanged. Copy again from Models and retry within two minutes. Allow Paste if prompted.")
+        }
+        setMode(.idle)
+    }
+
+    @objc private func clearImportedConfig() {
+        JevStore.clearKeyboardImport()
+        importNotice = L("已清除独立配置。现在使用 App Group；不可用时请重新导入。",
+                         "Local config cleared. Using App Group; re-import if sharing is unavailable.")
+        setMode(.idle)
+    }
+
     @objc private func analyzeClipboard() {
         lastSource = .clipboard
         guard hasFullAccess else { setMode(.gate); return }
+        guard !JevConfigClipboard.containsConfig else {
+            importNotice = L("剪贴板中是模型配置，请点「导入配置」。", "The clipboard contains configuration. Tap Import Config.")
+            setMode(.idle)
+            return
+        }
         guard let text = UIPasteboard.general.string?
             .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             errorText = L("剪贴板是空的。先在聊天里长按要回的消息 →「复制」，再回来点分析。", "The clipboard is empty. Long-press a message in your chat, copy it, then tap Analyze.")
@@ -712,10 +768,11 @@ final class KeyboardViewController: UIInputViewController {
     @objc private func backToIdle() { setMode(.idle) }
 
     private func run(message: String) {
+        guard hasFullAccess else { setMode(.gate); return }
         lastMessage = message
         setMode(.loading)
         stageLabel.text = L("判断中…", "Judging…")
-        let pipeline = JevPipeline(cfg: JevStore.loadConfig())
+        let pipeline = JevPipeline(cfg: JevStore.loadKeyboardConfig())
 
         Task { @MainActor [weak self] in
             let analysis = await pipeline.analyze(
