@@ -127,17 +127,50 @@ enum JevStore {
     private static let configKey = "jev.config.v1"
     private static let removedGenerationBase = "http://101.132.131.220:11111/v1"
     private static let statusKey = "jev.kbstatus.v1"
-    private static let canaryKey = "jev.canary.v1"
 
     static var defaults: UserDefaults {
         UserDefaults(suiteName: appGroupID) ?? .standard
     }
 
-    /// App Group 容器是否真的可写可读（签名没带上 entitlement 时 suite 会静默退化为私有容器）。
+    /// suite 内自己写自己读不能证明共享成功；无 entitlement 时也可能返回成功。
     static var groupWritable: Bool {
-        let stamp = "t\(Date().timeIntervalSince1970)"
-        defaults.set(stamp, forKey: canaryKey)
-        return defaults.string(forKey: canaryKey) == stamp
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) != nil
+    }
+
+    private static let keyboardImportKey = "jev.keyboard.import.v1"
+
+    static var keyboardImport: JevKeyboardTransfer? {
+        guard let data = UserDefaults.standard.data(forKey: keyboardImportKey) else { return nil }
+        return try? JevKeyboardTransfer.decode(data)
+    }
+
+    static func loadKeyboardConfig() -> JevConfig {
+        keyboardImport?.config ?? loadConfig()
+    }
+
+    static func loadKeyboardLanguage() -> JevLanguage {
+        keyboardImport?.language ?? loadLanguage()
+    }
+
+    static func saveKeyboardConfig(_ config: JevConfig) {
+        if var local = keyboardImport {
+            local.config = config
+            if let data = try? local.encoded() {
+                UserDefaults.standard.set(data, forKey: keyboardImportKey)
+            }
+        } else {
+            saveConfig(config)
+        }
+    }
+
+    /// 只在键盘进程调用：写扩展自己的沙盒，不需要 App Group。
+    static func importKeyboardConfig(_ data: Data) throws {
+        _ = try JevKeyboardTransfer.decode(data)
+        UserDefaults.standard.set(data, forKey: keyboardImportKey)
+    }
+
+    static func clearKeyboardImport() {
+        UserDefaults.standard.removeObject(forKey: keyboardImportKey)
     }
 
     static func loadConfig() -> JevConfig {
@@ -194,3 +227,86 @@ enum JevStore {
     }
 #endif
 }
+
+// MARK: - 主 App → 键盘的显式配置传输
+
+struct JevKeyboardTransfer: Codable {
+    var format = "jev-keyboard-config"
+    var version = 1
+    var config: JevConfig
+    var language: JevLanguage
+
+    private static let maxBytes = 256 * 1024
+
+    enum TransferError: Error {
+        case invalid
+    }
+
+    func encoded() throws -> Data {
+        let data = try JSONEncoder().encode(self)
+        _ = try Self.decode(data)
+        return data
+    }
+
+    static func decode(_ data: Data) throws -> Self {
+        guard data.count <= maxBytes else { throw TransferError.invalid }
+        let value = try JSONDecoder().decode(Self.self, from: data)
+        guard value.format == "jev-keyboard-config", value.version == 1,
+              !value.config.genKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !value.config.genModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              validEndpoint(value.config.genBase) else { throw TransferError.invalid }
+        if !value.config.judgeKey.isEmpty && !validEndpoint(value.config.judgeBase) {
+            throw TransferError.invalid
+        }
+        let extra = value.config.genExtraJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !extra.isEmpty {
+            guard let json = extra.data(using: .utf8),
+                  (try? JSONSerialization.jsonObject(with: json)) is [String: Any] else {
+                throw TransferError.invalid
+            }
+        }
+        return value
+    }
+
+    private static func validEndpoint(_ raw: String) -> Bool {
+        guard let url = URL(string: raw),
+              let scheme = url.scheme?.lowercased(), ["https", "http"].contains(scheme),
+              let host = url.host, !host.isEmpty,
+              url.user == nil, url.password == nil else { return false }
+        return true
+    }
+}
+
+#if canImport(UIKit)
+import UIKit
+
+/// 专用二进制类型，不提供纯文本表示，避免把含 Key 的配置粘贴进聊天或交给模型分析。
+/// 剪贴板不是加密存储；仅由用户点击复制/导入，限制本机并在两分钟后过期。
+enum JevConfigClipboard {
+    static let type = "com.jevchat.jarvis.keyboard-config"
+
+    static func copy(config: JevConfig, language: JevLanguage) throws {
+        let data = try JevKeyboardTransfer(config: config, language: language).encoded()
+        UIPasteboard.general.setItems([[type: data]], options: [
+            .localOnly: true,
+            .expirationDate: Date().addingTimeInterval(120),
+        ])
+    }
+
+    static var containsConfig: Bool {
+        UIPasteboard.general.contains(pasteboardTypes: [type])
+    }
+
+    static func importIntoKeyboard() throws {
+        let pasteboard = UIPasteboard.general
+        let changeCount = pasteboard.changeCount
+        guard let data = pasteboard.data(forPasteboardType: type) else {
+            throw JevKeyboardTransfer.TransferError.invalid
+        }
+        try JevStore.importKeyboardConfig(data)
+        if pasteboard.changeCount == changeCount {
+            pasteboard.items = []
+        }
+    }
+}
+#endif

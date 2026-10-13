@@ -62,12 +62,12 @@ struct SetupView: View {
 
             row(icon: "externaldrive.connected.to.line.below", title: jevLocalized(store.language, zh: "App Group 共享", en: "App Group sharing"),
                 ok: groupOK, detail: groupOK
-                    ? jevLocalized(store.language, zh: "配置可以同步到键盘", en: "Configuration syncs to the keyboard")
-                    : jevLocalized(store.language, zh: "共享容器不可用：请确认用 Xcode 把 App 和键盘扩展签在同一个 Team 下", en: "The shared container is unavailable. Sign both targets with the same Team."))
+                    ? jevLocalized(store.language, zh: "主 App 可访问共享容器；键盘也需匹配签名。独立配置模式需手动导入", en: "The app can access the shared container; the keyboard needs matching signing. Local copies require manual import.")
+                    : jevLocalized(store.language, zh: "共享容器不可用：免费签名可在「模型」页复制配置，再到键盘点「导入配置」", en: "Shared container unavailable. Copy config from Models, then tap Import Config in the keyboard."))
         } header: {
             Text(jevLocalized(store.language, zh: "状态", en: "Status"))
         } footer: {
-            Text(jevLocalized(store.language, zh: "键盘每次被唤起时会回写状态，这里每 2 秒刷新。", en: "The keyboard writes its status when opened. This view refreshes every 2 seconds."))
+            Text(jevLocalized(store.language, zh: "键盘每次被唤起时会回写状态，这里每 2 秒刷新。无 App Group 时无法读取键盘状态，上方未检测到不代表键盘不可用，请以键盘内提示为准。", en: "The keyboard writes its status when opened; this view refreshes every 2 seconds. Without App Group, status cannot be read here. Check the keyboard itself."))
         }
     }
 
@@ -111,7 +111,7 @@ struct SetupView: View {
     private var privacySection: some View {
         Section(jevLocalized(store.language, zh: "隐私边界", en: "Privacy")) {
             Label(jevLocalized(store.language, zh: "聊天内容只发给你自己配置的模型接口，无自建服务器、不落盘、不进日志", en: "Chat content is sent only to the model endpoint you configure. No server, storage, or logs."), systemImage: "hand.raised")
-            Label(jevLocalized(store.language, zh: "Key 存在本机 App Group 私有容器，仅 App 与键盘可读", en: "The key stays in a private App Group container readable only by the app and keyboard."), systemImage: "key")
+            Label(jevLocalized(store.language, zh: "Key 保存在本机容器；手动同步会临时复制到剪贴板，导入后键盘保存独立副本", en: "Keys stay in local containers. Manual sync temporarily copies them to the clipboard; the keyboard then saves its own copy."), systemImage: "key")
             Label(jevLocalized(store.language, zh: "候选只「插入」输入框，发送永远由你手动完成", en: "Suggestions are only inserted into the field. You always send manually."), systemImage: "square.and.arrow.down.on.square")
             Label(jevLocalized(store.language, zh: "键盘不监听、不上传按键内容；完全访问可随时在系统设置里关闭或移除键盘", en: "The keyboard does not monitor or upload keystrokes. Full Access can be disabled anytime."), systemImage: "shield")
         }

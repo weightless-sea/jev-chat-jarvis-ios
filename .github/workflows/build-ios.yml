@@ -3,6 +3,8 @@ name: Build Jev Jarvis IPA
 
 on:
   workflow_dispatch:
+  push:
+    branches: [fix/keyboard-config-import]
 
 permissions:
   contents: read
@@ -18,6 +20,11 @@ jobs:
       - name: Check Xcode
         run: |
           xcodebuild -version
+
+      - name: Check shared configuration and prompts
+        run: |
+          swiftc -o "$RUNNER_TEMP/jevcheck" tools/PromptCheck/main.swift Shared/*.swift
+          "$RUNNER_TEMP/jevcheck"
 
       - name: Build unsigned iPhone app
         shell: bash

@@ -99,6 +99,7 @@ extension JevStore {
     private static let languageKey = "jev.language.v1"
 
     static func loadLanguage() -> JevLanguage {
+        if let local = keyboardImport { return local.language }
         guard let raw = defaults.string(forKey: languageKey),
               let language = JevLanguage(rawValue: raw) else { return .chinese }
         return language

@@ -127,3 +127,11 @@ Copyright © 2026 eatmoreduck, Xlff, and jev-chat contributors. Code is open-sou
 - **Legitimate use only**: this project assists your own sincere everyday communication. It must not be used for anything unlawful — including but not limited to fraud (romance/investment scams, elder fraud), impersonation, harassment, or spam marketing
 - **Disclaimer**: provided "as is"; the authors are not involved in, aware of, or responsible for any specific usage. It only processes chats on your own device that you are entitled to see, and candidates are only inserted into the input field — **never sent automatically**
 - Full risk disclosure: [Usage statement & risk notice](https://github.com/jev-chat/jev-chat-jarvis-ios/issues/2)
+
+## Manual keyboard configuration for sideloaded builds
+
+If the app connection test succeeds but a re-signed keyboard is unconfigured, enable Full Access, open **Models → Copy Config to Keyboard**, then tap **Import Config** in the Jev keyboard within two minutes. Allow Paste if prompted. Do not paste configuration into a chat field. After import, copy the chat message again and analyze it.
+
+The keyboard saves its own copy of generation/judge credentials, tones and language without App Group. Repeat the transfer after changes in the app. Keyboard tone edits affect only its local copy. **Clear Local Config** deletes that copy and restores App Group reads. Without App Group, the main app cannot report keyboard status.
+
+The transfer includes API keys, is not encrypted, uses a custom non-text clipboard type, stays on this device and expires after two minutes. Successful import clears it. Do not share configuration. The signing tool must still retain the keyboard extension, and Full Access is still required.
