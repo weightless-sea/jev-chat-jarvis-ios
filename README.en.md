@@ -2,14 +2,14 @@
 
 ![Swift](https://img.shields.io/badge/Swift-5+-F05138.svg)
 ![Platform](https://img.shields.io/badge/platform-iOS%2016+-lightgrey.svg)
-![Version](https://img.shields.io/badge/version-0.1.0-orange.svg)
+![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 [中文](README.md) | English
 
 You receive a message in a chat app → the **intent**, **risk**, and **reply suggestions** appear right on the keyboard inside that app. Tap once and the reply lands in the input field.
 
-No app switching, no background capture, no screen-recording permission — **one custom keyboard that works in every chat app**, in any input field.
+No app switching, no background capture — **one custom keyboard that works in every chat app**, in any input field. Too lazy to copy? Turn on **Live Mode** (optional): a broadcast extension reads the screen with on-device OCR and the keyboard offers a one-tap "Read screen" analysis — no long-pressing, no clipboard.
 
 <p align="center">
   <img src="docs/demo.gif" alt="Live demo: long-press to copy a message → the keyboard shows intent/risk/suggestions → tap to insert" width="320">&nbsp;&nbsp;
@@ -44,6 +44,16 @@ The app and keyboard support **Chinese and English**. Switch languages on the **
 4. Tap the candidate you like → the text goes straight into the input field → **sending is always manual** (this project never auto-sends)
 
 There is also an **Analyze input text** button for drafts you are unsure about (reads `documentContextBeforeInput`).
+
+### 4. Live Mode (copy-free, optional)
+
+Don't want to long-press-copy every message? On the app's **Live** tab tap the system broadcast button → pick **Jev Live** → Start Broadcast:
+
+1. The broadcast upload extension (`JevLive`) samples one frame every 2 seconds and runs **on-device Vision OCR** (accurate tier, Chinese), splits bubbles into "them / me" by horizontal position, and strips timestamps and bottom-bar UI. **Conversation gating included**: recognition only produces content when both sides' bubbles are visible (a real chat); switch to Settings/Photos and nothing is recognized (iOS exposes no "current foreground app" API, so a per-app allow-list is impossible — this is the strongest approximation)
+2. The snapshot goes into the App Group: the Live tab reconstructs the conversation in real time, and the idle keyboard lights up a "Read screen: '…their latest message…'" button plus an "Earlier" list — the extension watches while you scroll through chat history, so older messages can be picked too. Tap once for candidates, no clipboard involved
+3. OCR happens entirely on-device; only when you trigger an analysis does the recognized text go to the model endpoint you configured. iOS shows the purple recording indicator the whole time; stop from Control Center
+
+See [`docs/LIVE_MODE.md`](docs/LIVE_MODE.md) for details and device test steps. Note: the broadcast sheet is system UI — it **only responds to a real user tap on a real device** (it never appears in the Simulator).
 
 ## Configuration
 
@@ -92,27 +102,31 @@ UI regression (launch smoke, tab traversal, keyboard enablement) and App Store s
 │   ├── JevJudge.swift     # TypeSafe systemone: judging + ranking
 │   ├── JevDraft.swift     # OpenAI/Anthropic drafting
 │   └── JevPipeline.swift  # judge → concurrent per-tone drafting → ranking
-├── App/Sources/           # SwiftUI: Home (keyboard status) / Models / Tones / Try it
+├── App/Sources/           # SwiftUI: Home (keyboard status) / Models / Tones / Live / Try it
 ├── App/Assets.xcassets/   # AppIcon (edit via tools/MakeAppIcon, never the PNGs)
 ├── Keyboard/Sources/      # UIKit keyboard extension (system controls only, <60MB memory)
-├── UITests/               # XCUITest: launch/tab/keyboard regression + store screenshot capture
+├── Broadcast/Sources/     # ReplayKit broadcast upload extension (screen → local OCR, sized for the 50MB cap)
+├── Shared/JevLive.swift   # Live-mode shared layer: snapshot model / App Group store / OCR engine / chat parser
+├── UITests/               # XCUITest: launch/tab/keyboard regression + store screenshot capture + live device flow
 ├── marketing/app-store-upload/  # App Store screenshots (source captures + npm script)
 └── tools/
     ├── PromptCheck/       # regression checks
+    ├── live_ocr_smoke.swift  # live OCR pipeline smoke test (runs on Mac, no iPhone needed)
     └── MakeAppIcon/       # renders the AppIcon: swiftc -O -o /tmp/makeappicon tools/MakeAppIcon/main.swift && /tmp/makeappicon App/Assets.xcassets/AppIcon.appiconset
 ```
 
 ## Known limitations
 
-- **Copied messages carry no context**: the clipboard usually holds just that one line. If your chat app supports copying quoted text, the quote rides along; multi-turn context is on the roadmap
+- **Copied messages carry no context**: the clipboard usually holds just that one line. If your chat app supports copying quoted text, the quote rides along; for automatic context use Live Mode
 - Fixed keyboard height of 320pt; the candidate list scrolls when long; landscape is not adapted
 - The App Group requires both targets signed with the same Team; free personal accounts usually work, occasionally a paid account is needed
 - Secure inputs (password fields) force the system keyboard (system behavior, not a bug)
 - Keyboards signed with a free account expire after 7 days and need a reinstall
+- Live Mode: the broadcast sheet only responds to a real user tap on a real device (never in the Simulator); left/right attribution is a horizontal-position heuristic (quote blocks and group chats can mis-assign); recognition runs every 2 seconds, not a word-by-word live caption
 
 ## Roadmap
 
-1. **Automatic sensing**: the main app uses ScreenCaptureKit (iOS 26+ `UIBackgroundModes: screen-capture`) to read the screen and analyze, writes candidates into the App Group, and the keyboard panel **proactively displays** ready candidates — sensing and insertion decoupled
+1. **Automatic sensing**: Live Mode (ReplayKit broadcast + on-device OCR) has landed with the keyboard exit; next up: auto-candidates for new messages while the keyboard is open (with a toggle, to avoid burning tokens) and group-chat sender disambiguation
 2. Full QWERTY inside the keyboard (type without switching)
 3. Group-chat adaptation (`@` prefix), knowledge base (contact profiles / standing notes)
 4. Scheduled re-signing / TestFlight distribution — the full workflow with a borrowed developer account is in [`docs/TESTFLIGHT.md`](docs/TESTFLIGHT.md)

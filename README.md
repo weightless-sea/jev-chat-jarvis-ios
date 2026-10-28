@@ -2,14 +2,14 @@
 
 ![Swift](https://img.shields.io/badge/Swift-5+-F05138.svg)
 ![Platform](https://img.shields.io/badge/platform-iOS%2016+-lightgrey.svg)
-![Version](https://img.shields.io/badge/version-0.1.0-orange.svg)
+![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 中文 | [English](README.en.md)
 
 聊天 App 收到一条消息 → 在**当前聊天 App 的键盘上**直接看到这句话的**意图、风险**和**候选回复**，点一下就进输入框。
 
-不跳 App、不切后台、不申请录屏权限——**一个自定义键盘打通所有聊天软件**，任何输入框都能用。
+不跳 App、不切后台、不申请录屏权限——**一个自定义键盘打通所有聊天软件**，任何输入框都能用。懒得复制就开**直播模式**（可选）：广播扩展在本地 OCR 读屏，键盘上直接出「读屏幕分析」，连长按复制都省了。
 
 <p align="center">
   <img src="docs/demo.gif" alt="键盘实际演示：长按复制对方消息 → 键盘上出意图/风险/候选 → 点按插入输入框" width="320">&nbsp;&nbsp;
@@ -53,6 +53,16 @@
 
 另有「分析输入框文字」按钮：分析你打到一半拿不准的话（读 `documentContextBeforeInput`）。
 
+### 4. 直播模式（免复制，可选）
+
+不想每条消息都长按复制？在 App 的「直播」页点系统广播按钮 → 选「Jev 直播」→ 开始广播：
+
+1. 广播扩展（`JevLive`）每 2 秒取一帧，**本机 Vision OCR**（accurate 档，中文）识别聊天画面，按气泡横向位置分「我方 / 对方」，洗掉时间戳和底部 UI。**带会话门控**：只有画面同时出现左右两侧气泡（真聊天）才产生识别内容，切去设置/相册等其他 App 时不留任何识别结果（iOS 不提供「当前前台 App」API，按 App 白名单过滤做不到，这是能做到的最强近似）
+2. 快照写 App Group：App「直播」页实时还原对话；键盘待机页亮出「读屏幕分析：『对方最新一条』」，还有「回复更早」列表——你滚动浏览聊天历史时它也在看，更早的消息一样能挑着回。点一下直接出候选，全程不用碰剪贴板
+3. 只有当你触发分析时，识别出的对话文本才会发往你自己配置的模型；OCR 全程在本机完成，状态栏紫色录屏指示全程可见，停止就在控制中心
+
+细节与真机测试步骤见 [`docs/LIVE_MODE.md`](docs/LIVE_MODE.md)。注意：广播面板是系统 UI，**只在真机上响应真人点按**（模拟器不弹）。
+
 ## 配置
 
 全部在 App 内完成，改完即存、键盘即时生效（无需重启）：
@@ -74,7 +84,11 @@
 口径回归（Mac 上直接跑，不需要 iPhone）：
 
 ```bash
+# 管线口径：意图/风险/话术/prompt/清洗
 swiftc -o /tmp/jevcheck tools/PromptCheck/main.swift Shared/*.swift && /tmp/jevcheck
+
+# 直播 OCR 链路：识别/左右归属/清洗/会话门控/模糊去重/目标累积
+tools/run_live_smoke.sh
 ```
 
 ## 工程结构
@@ -90,13 +104,16 @@ swiftc -o /tmp/jevcheck tools/PromptCheck/main.swift Shared/*.swift && /tmp/jevc
 │   ├── JevJudge.swift     # TypeSafe systemone：判断 + 排序
 │   ├── JevDraft.swift     # OpenAI/Anthropic 起草
 │   └── JevPipeline.swift  # 判断 → 每话术并发起草 → 排序
-├── App/Sources/           # SwiftUI：开始（键盘状态）/ 模型 / 话术 / 试一试
+├── App/Sources/           # SwiftUI：开始（键盘状态）/ 模型 / 话术 / 直播 / 试一试
 ├── App/Assets.xcassets/   # AppIcon（改设计见 tools/MakeAppIcon，别手改 PNG）
 ├── Keyboard/Sources/      # UIKit 键盘扩展（内存 <60MB 约束下的纯系统控件）
-├── UITests/               # XCUITest：冷启动/Tab 遍历/键盘启用回归 + 上架截图采集
+├── Broadcast/Sources/     # ReplayKit 广播上传扩展（录屏→本地 OCR，50MB 内存硬顶内只做识别与落盘）
+├── Shared/JevLive.swift   # 直播模式共享层：快照模型 / App Group 存储 / OCR 引擎 / 对话解析
+├── UITests/               # XCUITest：冷启动/Tab 遍历/键盘启用回归 + 上架截图采集 + 直播真机链路
 ├── marketing/app-store-upload/  # App Store 上架截图（source 原图 + npm 生成脚本）
 └── tools/
     ├── PromptCheck/       # 口径回归
+    ├── live_ocr_smoke.swift  # 直播 OCR 链路冒烟（Mac 上跑，不用 iPhone）
     └── MakeAppIcon/       # 画 AppIcon：swiftc -O -o /tmp/makeappicon tools/MakeAppIcon/main.swift && /tmp/makeappicon App/Assets.xcassets/AppIcon.appiconset
 ```
 
@@ -110,15 +127,16 @@ xcodebuild -project JevJarvis.xcodeproj -target JevJarvis -sdk iphoneos \
 
 ## 已知限制
 
-- **复制的消息不含上下文**：剪贴板里通常只有那一条。如果聊天 App 支持复制引用内容，可借此带上被引文字；多轮上下文见路线图
+- **复制的消息不含上下文**：剪贴板里通常只有那一条。如果聊天 App 支持复制引用内容，可借此带上被引文字；要自动带上下文用「直播模式」
 - 键盘高度固定 320pt，候选多时可滚动；横屏未适配
 - App Group 需两个 target 同一 Team 签名；免费个人账号一般可用，个别情况下需付费账号
 - 密码框等安全输入会强制系统键盘（系统行为，不是 bug）
 - 免费账号签的键盘 7 天过期需重装
+- 直播模式：广播面板只在真机上响应真人点按（模拟器不弹）；左右归属是横向位置启发式，引用块/群聊可能判错边；识别每 2 秒一次，不是逐字逐句的实时字幕
 
 ## 路线图
 
-1. **感知自动化**：主 App 走 ScreenCaptureKit（iOS 26+ 的 `UIBackgroundModes: screen-capture`）自动读屏分析，把候选写进 App Group，键盘面板**主动展示**已就绪的候选——键盘继续当展示+填入端，感知与填入解耦
+1. **感知自动化**：直播模式（ReplayKit 广播 + 本地 OCR）已落地键盘出口；下一步做键盘打开期间新消息自动出候选（带开关，避免白烧 token）与群聊 sender 区分
 2. 键盘内完整 QWERTY（免切换打字）
 3. 群聊适配（`@` 前缀）、知识库（联系人档案/常驻笔记）
 4. 定时换签名 / TestFlight 分发 —— 借他人开发者账号的完整流程见 [`docs/TESTFLIGHT.md`](docs/TESTFLIGHT.md)
@@ -148,4 +166,4 @@ Copyright © 2026 eatmoreduck、Xlff 与 jev-chat 贡献者。代码以 [MIT](LI
 
 配置包含 API Key，剪贴板传输未加密，请勿分享。复制使用非文本专用类型，仅限本机、两分钟过期，成功导入后清除；不会自动读取剪贴板或自动导入。App Group 不可用时，主 App 无法读取键盘状态，请以键盘里的提示为准。此方案解决配置共享，不会替代签名工具安装键盘扩展的能力。
 
-修复分支 `fix/keyboard-config-import` 推送后会自动运行共享逻辑回归并构建 IPA，也可手动运行 Actions 的 `Build Jev Jarvis IPA`，选择该分支，下载 `JevJarvis-unsigned` 产物。
+修复分支 `integration/upstream-0.2.0` 推送后会自动运行共享逻辑回归并构建 IPA，也可手动运行 Actions 的 `Build Jev Jarvis IPA`，选择该分支，下载 `JevJarvis-unsigned` 产物。

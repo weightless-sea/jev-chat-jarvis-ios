@@ -113,8 +113,8 @@ plutil -p /tmp/JevJarvis.xcarchive/Products/Applications/JevJarvis.app/PlugIns/J
 
 | 步骤 | 谁做 | 说明 |
 |---|---|---|
-| 1. 注册 App ID | 个人账号只有朋友能做 | 门户 → Identifiers → 新建 App ID，Bundle ID 用 **explicit** `com.jevchat.jarvis`，并为键盘扩展注册 `com.jevchat.jarvis.keyboard` |
-| 2. 注册 App Group | 同上 | 门户 → Identifiers → App Groups → 注册或选用 `group.com.jevchat.jarvis`，**同时授权给 App 和键盘扩展两个 App ID**（漏这步签名会报 entitlement 不匹配） |
+| 1. 注册 App ID | 个人账号只有朋友能做 | 门户 → Identifiers → 新建 App ID，Bundle ID 用 **explicit** `com.jevchat.jarvis`，并为两个扩展注册 `com.jevchat.jarvis.keyboard`（键盘）和 `com.jevchat.jarvis.live`（直播广播扩展） |
+| 2. 注册 App Group | 同上 | 门户 → Identifiers → App Groups → 注册或选用 `group.com.jevchat.jarvis`，**同时授权给 App 和两个扩展共三个 App ID**（漏这步签名会报 entitlement 不匹配） |
 | 3. 建 App 记录 | 朋友或你的 App Manager 角色 | ASC → My Apps → **+** → New App。Platform iOS / Name `Jev Jarvis` / Primary Language 简体中文 / Bundle ID 选第 1 步那个 / SKU 随便填唯一串 |
 | 4. 把你加成 ASC 用户 | 朋友 | ASC → Users and Access → **+**。角色给 **App Manager**（够用）或 **Admin**。邀请链接 3 天过期 |
 | 5. （个人账号走这条）生成 Team API Key | 朋友 | ASC → Users and Access → **Integrations** → App Store Connect API → **Team Keys** → **+**。下载 `.p8`（**只能下一次**），记下 Key ID 和 Issuer ID |
@@ -237,6 +237,8 @@ plutil -p /tmp/JevJarvis.xcarchive/Products/Applications/JevJarvis.app/PlugIns/J
 | 签名报 entitlement 不匹配 | App Group 建了但没勾进 App ID | 回门户把 App Group 关联到 App ID |
 | 外部测试者点链接提示不可用 | 第一个 build 还在 Beta App Review / 已过 90 天 | 看 ASC 的 TestFlight 状态 |
 | 被审核拒 | 用户配置的 HTTP 端点传输聊天内容（4.4.1 「Transmit securely」） | 优先使用 HTTPS，并准确填写审核说明，见 1.4 |
+| 被审核拒 4.3(a) Design-Spam（2026-10-14 实际发生，0.1.0 (2)） | 机器初筛判定与商店同类 App 过于相似 | 见 [`REVIEW_4_3.md`](REVIEW_4_3.md)：0.2.0 起用「直播模式」做功能差异化 + 截图/描述改写 + Resolution Center 回复信模板 |
+| 直播模式点广播按钮没反应 | 面板是系统 UI：**模拟器永远不弹**；iOS 26 起合成事件（XCUITest/无障碍激活）也不触发 | 必须真机 + 真人点按；自动化只能断言按钮存在。见 `docs/LIVE_MODE.md` |
 
 ---
 

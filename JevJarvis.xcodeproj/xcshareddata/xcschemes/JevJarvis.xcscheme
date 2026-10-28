@@ -21,20 +21,6 @@
                ReferencedContainer = "container:JevJarvis.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "0FC0283F4DCF33E631462535"
-               BuildableName = "JevJarvisUITests.xctest"
-               BlueprintName = "JevJarvisUITests"
-               ReferencedContainer = "container:JevJarvis.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

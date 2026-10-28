@@ -22,12 +22,31 @@ final class KeyboardViewController: UIInputViewController {
     private var mode: Mode = .idle
     private var lastSource: Source = .clipboard
     private var lastMessage: String = ""
+    private var lastContext: String?
     private var analysis: Analysis?
     private var errorText: String = ""
     private var importNotice: String?
     private var stageLabel = UILabel()
 
-    private enum Source { case clipboard, inputField }
+    private enum Source { case clipboard, inputField, live }
+
+    /// 直播模式：广播扩展持续录屏 + 本地 OCR，快照放 App Group。
+    /// 快照新鲜且有待回消息时，待机页顶部多一个「读屏幕分析」主按钮，
+    /// 用户就不再需要长按复制每条消息。
+    private var liveTimer: Timer?
+    /// 上次轮询时的直播状态签名，变了才重画待机页（内容级，不是时间级）
+    private var lastLiveSignature = ""
+    /// 面板高度占整屏比例（广播扩展据此抬底部裁剪，防键盘自身被 OCR 进快照）
+    private var panelFraction: Double = 0
+
+    /// 直播目标的签名：监听态 + 主目标文本 + 累积历史条数。
+    /// 用内容而不是「是否 actionable」做签名——主目标文本一变（对方发新消息/用户滚到新片段）
+    /// 按钮就要跟上，但聊天滚动造成的空帧不能把按钮打没了又弹回来（2026-10-22 用户实测的「跳一下」）。
+    private static func liveSignature() -> String {
+        let snap = JevLiveStore.load()
+        let primary = snap?.latestIncoming ?? snap?.recent.first
+        return "\(JevLiveStore.isListening)|\(primary ?? "-")|\(snap?.recent.count ?? 0)"
+    }
 
     // MARK: 布局骨架
 
@@ -87,9 +106,36 @@ final class KeyboardViewController: UIInputViewController {
         // 回写状态：主 App「开始」页据此显示键盘是否已启用、是否给了完全访问
         JevStore.saveKeyboardStatus(KeyboardStatus(lastSeen: Date(), hasFullAccess: hasFullAccess))
         prewarm()
+        // 直播快照轮询：快照由广播扩展在别的进程里写，键盘只在待机页关心它活没活。
+        // 状态签名（监听态/主目标/历史条数）变化时重画——新消息到了按钮要跟上，
+        // 但每 2 秒的常规心跳不能触发重画打断点按。
+        lastLiveSignature = Self.liveSignature()
+        if liveTimer == nil {
+            liveTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+                // 顺手刷新面板高度上报的时间戳（扩展按 20 秒时效读取，断了上报就视为关闭）
+                if let self { JevLiveStore.setKeyboardPanel(fraction: self.panelFraction) }
+                self?.liveTick()
+            }
+        }
         // 刚出现时 frame 还没定，等键盘铺开后再量容器间隙
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.coverContainerGap()
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        liveTimer?.invalidate()
+        liveTimer = nil
+        JevLiveStore.setKeyboardPanel(fraction: 0)   // 面板没了，扩展不用再抬底部裁剪
+    }
+
+    private func liveTick() {
+        guard mode == .idle else { return }
+        let sig = Self.liveSignature()
+        if sig != lastLiveSignature {
+            lastLiveSignature = sig
+            render()
         }
     }
 
@@ -251,6 +297,13 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        // 上报面板高度比例：键盘一开聊天区底部就被面板盖住，扩展识别区必须同步抬高，
+        // 否则键盘自己的按钮文字（含上一轮目标）会被 OCR 进快照形成自反馈回路
+        let screenH = UIScreen.main.bounds.height
+        if screenH > 0 {
+            panelFraction = Double(view.bounds.height / screenH)
+            JevLiveStore.setKeyboardPanel(fraction: panelFraction)
+        }
         coverContainerGap()               // 铺开后如果容器比视图高，就补高盖住（通常量到的是等高）
         let width = view.bounds.width
         guard width > 0, lastFit == nil || lastFit!.mode != mode || lastFit!.width != width else { return }
@@ -356,11 +409,54 @@ final class KeyboardViewController: UIInputViewController {
     private func idleView() -> UIView {
         let cfg = JevStore.loadKeyboardConfig()
 
+        var rows: [UIView] = []
+        let snap = JevLiveStore.load()
+        let listening = JevLiveStore.isListening
+        // 主目标 = 当前帧尾部的对方消息；当前帧没有时退回累积历史里最近的一条。
+        // 键盘一弹聊天就滚到底、画面里可能只剩用户自己的消息——目标不能因此消失
+        // 乱跳（2026-10-22 用户实测），也不能因此只能回最新一条（用户要能挑历史消息）。
+        let primary = snap?.latestIncoming ?? snap?.recent.first
+        if listening, let primary {
+            // 目标列表：主目标（当前帧尾部；空帧时退回累积历史最近一条）+ 至多两条更早的。
+            // 拆开写不死类型检查器：数组拼接 + dropFirst + filter + prefix 一口气写会炸。
+            var targets: [String] = [primary]
+            for older in (snap?.recent ?? []).dropFirst()
+            where !LiveChatParser.areSameMessage(older, primary) && targets.count < 3 {
+                targets.append(older)
+            }
+            for (index, message) in targets.enumerated() {
+                let flattened = message.replacingOccurrences(of: "\n", with: " ")
+                // 预览给到 ~34 字 + 两行折行：用户必须能分清按钮对应的是哪条消息
+                //（2026-10-22 用户反馈 16 字截断「根本看不清楚回复哪一条内容，点不到」）
+                let preview = String(flattened.prefix(34)) + (flattened.count > 34 ? "…" : "")
+                let label = index == 0
+                    ? L("读屏幕分析：「\(preview)」", "Read screen: \"\(preview)\"")
+                    : L("回复更早：「\(preview)」", "Earlier: \"\(preview)\"")
+                let btn = KB.button(label,
+                                    icon: index == 0 ? "dot.radiowaves.left.and.right" : "clock.arrow.circlepath",
+                                    primary: index == 0,
+                                    font: .systemFont(ofSize: 13, weight: .semibold),
+                                    wraps: true)
+                btn.heightAnchor.constraint(equalToConstant: index == 0 ? 56 : 50).isActive = true
+                // 目标文本放 identifier 里传给 action（同话术格子的做法）
+                btn.accessibilityIdentifier = message
+                btn.addTarget(self, action: #selector(analyzeTarget(_:)), for: .touchUpInside)
+                rows.append(btn)
+            }
+        }
+
+        // 三态提示：有可选目标（按钮在上方）/ 只在监听还没读到任何对方消息 / 未开播。
+        // 「只在监听」这一态必须有明确反馈，否则开播后的键盘和平时长得一模一样，
+        // 用户会以为功能没生效（2026-10-22 真机首试：用户看着普通待机页直接退出去找客服了）。
         let guide = KB.label(
-            L("长按对方消息 → 复制，再点下面的按钮", "Long-press the message → Copy, then tap a button below"),
+            primary != nil ? L("直播监听中 · 免复制，点上面的按钮直接分析", "Live listening · no copy needed, tap a button above")
+                           : listening ? L("直播监听中 · 还没读到对方的新消息，回到聊天界面停一两秒再回来",
+                                           "Live listening · no new message from them yet. Stay in the chat a couple of seconds, then come back")
+                           : L("长按对方消息 → 复制，再点下面的按钮", "Long-press the message → Copy, then tap a button below"),
             font: .systemFont(ofSize: 12), color: KB.secondaryText)
 
-        let clipBtn = KB.button(L("分析剪贴板", "Analyze Clipboard"), icon: "doc.on.clipboard", primary: true,
+        let clipBtn = KB.button(L("分析剪贴板", "Analyze Clipboard"), icon: "doc.on.clipboard",
+                                primary: primary == nil,
                                 font: .systemFont(ofSize: 14, weight: .semibold))
         clipBtn.addTarget(self, action: #selector(analyzeClipboard), for: .touchUpInside)
 
@@ -368,7 +464,7 @@ final class KeyboardViewController: UIInputViewController {
                                  font: .systemFont(ofSize: 14, weight: .semibold))
         inputBtn.addTarget(self, action: #selector(analyzeInputField), for: .touchUpInside)
 
-        // 两个分析入口并排：左边读剪贴板（主路径，主色），右边读当前输入框
+        // 两个分析入口并排：左边读剪贴板，右边读当前输入框；直播有目标时主色让位给读屏幕
         let btnRow = UIStackView(arrangedSubviews: [clipBtn, inputBtn])
         btnRow.axis = .horizontal
         btnRow.spacing = 8
@@ -387,11 +483,15 @@ final class KeyboardViewController: UIInputViewController {
         // 待机页**不放**发送键：这一页还没有候选，没有可发的东西；而输入框一旦有字，
         // 宿主 App 自己的发送按钮就出来了，
         // 键盘下方再挂一个只是添乱。发送键只在结果页——点完候选、手还在面板上时用。
+        rows.append(guide)
+        rows.append(btnRow)
+        rows.append(tonesBtn)
         let importButton = KB.button(L("导入配置", "Import Config"), icon: "square.and.arrow.down")
         importButton.accessibilityIdentifier = "importKeyboardConfig"
         importButton.addTarget(self, action: #selector(importConfig), for: .touchUpInside)
         importButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        let vstack = UIStackView(arrangedSubviews: [guide, btnRow, tonesBtn, importButton])
+        rows.append(importButton)
+        let vstack = UIStackView(arrangedSubviews: rows)
         if JevStore.keyboardImport != nil {
             let local = KB.label(L("配置：键盘独立副本；主 App 修改后需重新导入", "Config: local copy; re-import after app changes"),
                                  font: .systemFont(ofSize: 11), color: KB.secondaryText, lines: 0)
@@ -414,7 +514,6 @@ final class KeyboardViewController: UIInputViewController {
                                 font: .systemFont(ofSize: 12), color: .systemOrange, lines: 0)
             vstack.addArrangedSubview(warn)
         }
-        // 小屏/横屏达到面板高度上限后允许滚动，导入和清除按钮仍然可达。
         let scroll = UIScrollView()
         scroll.addSubview(vstack)
         vstack.translatesAutoresizingMaskIntoConstraints = false
@@ -748,7 +847,7 @@ final class KeyboardViewController: UIInputViewController {
             setMode(.error)
             return
         }
-        run(message: text)
+        run(message: text, context: nil)
     }
 
     @objc private func analyzeInputField() {
@@ -761,22 +860,34 @@ final class KeyboardViewController: UIInputViewController {
             setMode(.error)
             return
         }
-        run(message: text)
+        run(message: text, context: nil)
     }
 
-    @objc private func regenerate() { run(message: lastMessage) }
+    /// 直播模式入口：不读剪贴板，读广播扩展 OCR 出来的对话快照。
+    /// 目标文本（当前帧尾部对方消息，或用户挑的「更早的消息」）放在按钮的
+    /// accessibilityIdentifier 里传入（同话术格子的做法）；context = 之前的对话——
+    /// 和剪贴板路径走同一条管线。
+    @objc private func analyzeTarget(_ sender: UIButton) {
+        lastSource = .live
+        guard hasFullAccess else { setMode(.gate); return }
+        guard let message = sender.accessibilityIdentifier, !message.isEmpty else { return }
+        run(message: message, context: JevLiveStore.load()?.contextText)
+    }
+
+    @objc private func regenerate() { run(message: lastMessage, context: lastContext) }
     @objc private func backToIdle() { setMode(.idle) }
 
-    private func run(message: String) {
+    private func run(message: String, context: String?) {
         guard hasFullAccess else { setMode(.gate); return }
         lastMessage = message
+        lastContext = context
         setMode(.loading)
         stageLabel.text = L("判断中…", "Judging…")
         let pipeline = JevPipeline(cfg: JevStore.loadKeyboardConfig())
 
         Task { @MainActor [weak self] in
             let analysis = await pipeline.analyze(
-                message: message, context: nil,
+                message: message, context: context,
                 onStage: { [weak self] stage in
                     Task { @MainActor in
                         switch stage {
