@@ -1,0 +1,73 @@
+
+name: Build Jev Jarvis IPA (Clean Upstream)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [upstream-clean-actions]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: xcode-27
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Check Xcode
+        run: |
+          xcodebuild -version
+
+      - name: Check shared configuration and prompts
+        run: |
+          swiftc -o "$RUNNER_TEMP/jevcheck" tools/PromptCheck/main.swift Shared/*.swift
+          "$RUNNER_TEMP/jevcheck"
+
+      - name: Build unsigned iPhone app
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          xcodebuild \
+            -project JevJarvis.xcodeproj \
+            -scheme JevJarvis \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build
+
+      - name: Package IPA and verify both extensions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP="$RUNNER_TEMP/build/Build/Products/Release-iphoneos/JevJarvis.app"
+
+          test -d "$APP"
+          test -d "$APP/PlugIns/JevKeyboard.appex"
+          test -d "$APP/PlugIns/JevLive.appex"
+
+          echo "Main app, keyboard extension and broadcast extension found"
+
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
+
+          cd "$RUNNER_TEMP/ipa"
+          /usr/bin/zip -qry \
+            "$GITHUB_WORKSPACE/JevJarvis-upstream-clean-unsigned.ipa" \
+            Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: JevJarvis-upstream-clean-unsigned
+          path: JevJarvis-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
