@@ -113,10 +113,22 @@ func check(_ cond: Bool, _ name: String) {
     if !cond { failures += 1 }
 }
 
-check(!lines.isEmpty, "识别出非空对话行")
-check(!lines.contains { $0.side == .system }, "时间戳/底部 UI 被清洗掉")
-check(!lines.contains { $0.text.contains("鱼塘") }, "群聊名称（导航栏）被识别区域排除掉")
-check(!lines.contains { $0.text.contains("10月15日") }, "跨天日期行被清洗掉")
+let requireOCR = ProcessInfo.processInfo.environment["JEV_REQUIRE_OCR"] != "0"
+if !requireOCR {
+    print("::warning::Hosted macOS Vision Chinese OCR is not reliable here; real-image OCR assertions are not enforced. Pure parser regression tests remain strict.")
+}
+func checkOCR(_ cond: Bool, _ name: String) {
+    if requireOCR {
+        check(cond, name)
+    } else {
+        print("⏭️ Vision OCR (requires local/device check): " + name)
+    }
+}
+
+checkOCR(!lines.isEmpty, "识别出非空对话行")
+checkOCR(!lines.contains { $0.side == .system }, "时间戳/底部 UI 被清洗掉")
+checkOCR(!lines.contains { $0.text.contains("鱼塘") }, "群聊名称（导航栏）被识别区域排除掉")
+checkOCR(!lines.contains { $0.text.contains("10月15日") }, "跨天日期行被清洗掉")
 // 自家 App/键盘的界面词（广播开着自己 App 时会被 OCR 到，2026-10-22 真机实锤）
 let selfUI = LiveChatParser.parse([
     LiveChatParser.Observation(text: "AI 分析输入框文字", boundingBox: CGRect(x: 0.55, y: 0.2, width: 0.3, height: 0.03)),
@@ -181,14 +193,43 @@ check(!LiveChatParser.extendsConversation(
 check(!LiveChatParser.extendsConversation(
     [.init(side: .them, text: "新内容")], previous: []),
     "上一帧为空（刚开播/刚切回）时无延续可言")
-check(lines.first?.side == .them, "第一行归属对方（左）")
-let lastMe = lines.filter { $0.side == .me }.last
-check(lastMe?.text.contains("好嘞") == true, "最后一条我方消息为「好嘞」")
-check(lines.last?.side == .them, "末尾是对方消息")
-// 注意：单字断言会踩 OCR 逐字抖动（「餐厅」曾偶发认成「贅厅」），锚定多字词
-check(lines.last?.text.contains("上次说的那家") == true, "末行是最后那条对方消息，实际：\(lines.last?.text ?? "nil")")
+// Deterministic parser regression: use Vision-equivalent normalized text rectangles.
+// Unlike VNRecognizeTextRequest, these results do not depend on hosted macOS OCR models.
+// This must stay strict in CI, so a real regression in parsing fails the IPA build.
+func fixture(_ text: String, x: CGFloat, y: CGFloat, w: CGFloat) -> LiveChatParser.Observation {
+    .init(text: text, boundingBox: CGRect(x: x, y: y, width: w, height: 0.028))
+}
+let fixtureLines = LiveChatParser.parse([
+    fixture("20:31", x: 0.4, y: 0.9, w: 0.2),
+    fixture("在吗，周末的那个方案你看了一眼没", x: 0.08, y: 0.82, w: 0.46),
+    fixture("看了看了，这两天有点忙", x: 0.55, y: 0.74, w: 0.39),
+    fixture("周五之前给你一版完整的", x: 0.58, y: 0.66, w: 0.35),
+    fixture("行，记得把报价也放进去，老板要看价格", x: 0.08, y: 0.58, w: 0.46),
+    fixture("好嘞", x: 0.78, y: 0.50, w: 0.13),
+    fixture("10月15日15:23", x: 0.35, y: 0.44, w: 0.3),
+    fixture("对了上次说的那家餐厅周末去吗", x: 0.08, y: 0.36, w: 0.46),
+    fixture("发送", x: 0.45, y: 0.05, w: 0.12),
+])
+check(fixtureLines.count == 6, "固定观测框解析出 6 行聊天，不包含日期/按钮，实际 \(fixtureLines.count)")
+check(fixtureLines.first?.side == .them, "固定观测框第一条为对方（左）")
+check(fixtureLines.filter { $0.side == .me }.last?.text == "好嘞", "固定观测框最后一条我方消息正确")
+check(fixtureLines.last?.side == .them, "固定观测框末条是对方")
+check(fixtureLines.last?.text == "对了上次说的那家餐厅周末去吗", "固定观测框末条文本正确")
+let fixtureSnap = LiveSnapshot(updatedAt: Date(), changedAt: Date(), lines: fixtureLines, frameCount: 1)
+check(fixtureSnap.latestIncoming == "对了上次说的那家餐厅周末去吗", "固定观测框 latestIncoming 正确")
+let fixtureContext = fixtureSnap.contextText ?? ""
+check(fixtureContext.contains("我：好嘞"), "固定观测框 contextText 包含我方历史")
+check(fixtureContext.contains("对方：行，记得把报价"), "固定观测框 contextText 包含对方历史")
+check(!fixtureContext.contains("10月15日") && !fixtureContext.contains("上次说的那家"), "固定观测框上下文不含日期/待回消息")
 
-if !lines.isEmpty {
+checkOCR(lines.first?.side == .them, "第一行归属对方（左）")
+let lastMe = lines.filter { $0.side == .me }.last
+checkOCR(lastMe?.text.contains("好嘞") == true, "最后一条我方消息为「好嘞」")
+checkOCR(lines.last?.side == .them, "末尾是对方消息")
+// 注意：单字断言会踩 OCR 逐字抖动（「餐厅」曾偶发认成「贅厅」），锚定多字词
+checkOCR(lines.last?.text.contains("上次说的那家") == true, "末行是最后那条对方消息，实际：\(lines.last?.text ?? "nil")")
+
+if requireOCR && !lines.isEmpty {
     let snap = LiveSnapshot(updatedAt: Date(), changedAt: Date(), lines: lines, frameCount: 1)
     check(snap.latestIncoming?.contains("上次说的那家") == true,
           "latestIncoming = 末条对方消息，实际：\(snap.latestIncoming ?? "nil")")

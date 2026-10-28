@@ -132,3 +132,10 @@ xcodebuild test -project JevJarvis.xcodeproj -scheme JevJarvis \
 - [ ] 群聊 sender 区分；引用/回复消息的归并
 - [ ] 快照里带 App 名/会话名，避免把不相关 App 的画面当对话（目前靠用户自己别乱切）
 - [ ] 审核条款 5.1.1/5.1.2 的隐私话术打磨
+
+
+## CI 的 Vision OCR 说明（Fork 整合版）
+
+GitHub Actions 托管 macOS 27 runner 上曾出现 Vision `.accurate` 中文 OCR 对合成图返回空结果，`.fast` 只返回乱码；因此 CI 运行 `JEV_REQUIRE_OCR=0 tools/run_live_smoke.sh`，仍严格校验对话框坐标解析、说话人归属、上下文提取、消息去重、门控和历史消息累积，仅对依赖系统 OCR 模型的真实图识别断言报告跳过。不能把这当成真机 OCR 验证已通过。
+
+在具备正常中文 OCR 资源的 Mac 上执行 `JEV_REQUIRE_OCR=1 tools/run_live_smoke.sh`（默认也是严格模式）；最终仍需在 iPhone 真机验证直播广播扩展、App Group 共享和键盘读屏全链路。
