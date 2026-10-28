@@ -4,7 +4,7 @@ name: Build Jev Jarvis IPA
 on:
   workflow_dispatch:
   push:
-    branches: [fix/keyboard-config-import]
+    branches: [fix/keyboard-config-import, integration/upstream-0.2.0]
 
 permissions:
   contents: read
@@ -25,6 +25,9 @@ jobs:
         run: |
           swiftc -o "$RUNNER_TEMP/jevcheck" tools/PromptCheck/main.swift Shared/*.swift
           "$RUNNER_TEMP/jevcheck"
+
+      - name: Check Live Mode OCR pipeline
+        run: tools/run_live_smoke.sh
 
       - name: Build unsigned iPhone app
         shell: bash
@@ -52,8 +55,9 @@ jobs:
 
           test -d "$APP"
           test -d "$APP/PlugIns/JevKeyboard.appex"
+          test -d "$APP/PlugIns/JevLive.appex"
 
-          echo "Main app and keyboard extension found"
+          echo "Main app, keyboard extension and broadcast extension found"
 
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"

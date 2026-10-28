@@ -100,6 +100,13 @@ extension JevStore {
 
     static func loadLanguage() -> JevLanguage {
         if let local = keyboardImport { return local.language }
+        // UI 测试覆盖：launch argument 优先于持久化值——设备上用户可能切过英文，
+        // 断言中文文案的用例需要确定性的语言（见 LiveBroadcastUITests）。
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-jevLanguage"), i + 1 < args.count,
+           let forced = JevLanguage(rawValue: args[i + 1]) {
+            return forced
+        }
         guard let raw = defaults.string(forKey: languageKey),
               let language = JevLanguage(rawValue: raw) else { return .chinese }
         return language

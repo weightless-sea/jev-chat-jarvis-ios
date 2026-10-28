@@ -41,6 +41,8 @@ struct JevJarvisApp: App {
                     .tabItem { Label(jevLocalized(store.language, zh: "模型", en: "Models"), systemImage: "brain.head.profile") }
                 TonesView()
                     .tabItem { Label(jevLocalized(store.language, zh: "话术", en: "Tones"), systemImage: "theatermasks") }
+                LiveView()
+                    .tabItem { Label(jevLocalized(store.language, zh: "直播", en: "Live"), systemImage: "dot.radiowaves.left.and.right") }
                 PlaygroundView()
                     .tabItem { Label(jevLocalized(store.language, zh: "试一试", en: "Try it"), systemImage: "flask") }
             }

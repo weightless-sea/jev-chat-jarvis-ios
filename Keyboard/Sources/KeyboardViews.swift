@@ -59,9 +59,12 @@ enum KB {
     }
 
     static func button(_ title: String, icon: String? = nil, primary: Bool = false,
-                       font: UIFont = .systemFont(ofSize: 15, weight: .semibold)) -> UIButton {
+                       font: UIFont = .systemFont(ofSize: 15, weight: .semibold),
+                       wraps: Bool = false) -> UIButton {
         var config = UIButton.Configuration.filled()
         config.title = title
+        // wraps：标题可折行（直播目标按钮要展示接近整条的消息，用户才分得清是哪条）
+        config.titleLineBreakMode = wraps ? .byCharWrapping : .byTruncatingTail
         config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
             var out = incoming
             out.font = font
